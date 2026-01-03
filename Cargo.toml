@@ -1,0 +1,19 @@
+[package]
+name = "axum-jetpack"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "example"
+path = "src/example/example.rs"
+
+[dependencies]
+axum = { version = "0.8.8", features = ["multipart"] }
+http = "1.4.0"
+tokio = { version = "1.0", features = ["full"] }
+futures-util = "0.3.31"
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+tower = "0.5.2"
+pin-project = "1.1.10"
+hyper = "1.8.1"
