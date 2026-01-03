@@ -5,7 +5,7 @@ use axum::{
 use axum_jetpack::size_limit::{ErrorFormat, SizeLimitConfig, SizeLimitError};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
-use axum::response::Response;
+use axum::response::{Html, Response};
 use axum_jetpack::size_limit::layer::SizeLimitLayer;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -99,6 +99,19 @@ async fn main() {
                         msg
                     )
                 }
+                _ => {
+                    format!(
+                        r#"<!DOCTYPE html>
+                        <html>
+                        <head><title>Request Error</title></head>
+                        <body>
+                            <h1>❌ Request Error</h1>
+                            <p>There was a problem with your request.</p>
+                            <a href="/">Go back</a>
+                        </body>
+                        </html>"#
+                    )
+                }
             };
 
             Response::builder()
@@ -155,8 +168,8 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn index_page() -> &'static str {
-    r#"<!DOCTYPE html>
+async fn index_page() -> Html<&'static str> {
+    Html(r#"<!DOCTYPE html>
     <html>
     <head>
         <title>Size Limit Demo</title>
@@ -192,7 +205,7 @@ async fn index_page() -> &'static str {
             </div>
         </div>
     </body>
-    </html>"#
+    </html>"#)
 }
 
 async fn register_user(Json(user): Json<UserData>) -> Json<UploadResponse> {

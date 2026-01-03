@@ -13,6 +13,8 @@ pub enum SizeLimitError {
         actual_size: usize,
     },
     Other(String),
+    SizeOverflow,
+    ChunkTooLarge { max_chunk_size: usize, actual_chunk_size: usize },
 }
 
 impl std::fmt::Display for SizeLimitError {
@@ -22,6 +24,10 @@ impl std::fmt::Display for SizeLimitError {
                 write!(f, "Body too large: Maximum size is {} bytes", max_size)
             }
             SizeLimitError::Other(msg) => write!(f, "Error: {}", msg),
+            SizeLimitError::SizeOverflow => write!(f, "Size overflow error"),
+            SizeLimitError::ChunkTooLarge { max_chunk_size, actual_chunk_size: _ } => {
+                write!(f, "Chunk too large: Maximum chunk size is {} bytes", max_chunk_size)
+            }
         }
     }
 }
@@ -53,6 +59,20 @@ impl IntoResponse for SizeLimitError {
                     StatusCode::BAD_REQUEST,
                     "Bad request".to_string(),
                     Some(msg.clone()),
+                )
+            }
+            SizeLimitError::SizeOverflow => {
+                (
+                    StatusCode::BAD_REQUEST,
+                    "Size overflow".to_string(),
+                    Some("Request size calculation resulted in an overflow".to_string()),
+                )
+            }
+            SizeLimitError::ChunkTooLarge { max_chunk_size, actual_chunk_size } => {
+                (
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "Chunk too large".to_string(),
+                    Some(format!("Chunk size: {} bytes, Maximum allowed: {} bytes", actual_chunk_size, max_chunk_size)),
                 )
             }
         };
@@ -129,6 +149,26 @@ impl ErrorFormat {
                             None,
                         )
                     }
+                    SizeLimitError::SizeOverflow => {
+                        (
+                            StatusCode::BAD_REQUEST,
+                            "Size Overflow",
+                            "Request size calculation resulted in an overflow".to_string(),
+                            None,
+                        )
+                    }
+                    SizeLimitError::ChunkTooLarge { max_chunk_size, actual_chunk_size } => {
+                        let meta = serde_json::json!({
+                            "max_chunk_size": max_chunk_size,
+                            "actual_chunk_size": actual_chunk_size,
+                        });
+                        (
+                            StatusCode::PAYLOAD_TOO_LARGE,
+                            "Chunk Too Large",
+                            format!("Request chunk exceeds the maximum allowed size of {} bytes", max_chunk_size),
+                            Some(meta),
+                        )
+                    }
                 };
 
                 let error_detail = JsonApiErrorDetail {
@@ -156,6 +196,16 @@ impl ErrorFormat {
                     }
                     SizeLimitError::Other(msg) => {
                         (StatusCode::BAD_REQUEST, format!("400 Bad Request\n\n{}", msg))
+                    }
+                    SizeLimitError::SizeOverflow => {
+                        (StatusCode::BAD_REQUEST, "400 Bad Request\n\nRequest size calculation resulted in an overflow".to_string())
+                    }
+                    SizeLimitError::ChunkTooLarge { max_chunk_size, actual_chunk_size } => {
+                        let body = format!(
+                            "413 Payload Too Large\n\nChunk size: {} bytes\nMaximum allowed: {} bytes",
+                            actual_chunk_size, max_chunk_size
+                        );
+                        (StatusCode::PAYLOAD_TOO_LARGE, body)
                     }
                 };
 

@@ -9,11 +9,15 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use futures_util::{Stream, StreamExt};
-use pin_project::pin_project;
+use pin_project::{pin_project, pinned_drop};
 use std::convert::Infallible;
 use axum::body::HttpBody;
 use super::config::SizeLimitConfig;
 use super::error::SizeLimitError;
+
+/// Maximum size for an individual chunk (16MB)
+/// This prevents malicious clients from sending a single huge chunk
+const MAX_INDIVIDUAL_CHUNK_SIZE: usize = 16 * 1024 * 1024;
 
 /// Thread-safe service that checks body size based on content type
 #[derive(Clone)]
@@ -42,7 +46,15 @@ where
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx).map_err(|_| unreachable!())
+        // Convert inner error to Infallible instead of panicking
+        match self.inner.poll_ready(cx) {
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+            Poll::Ready(Err(_)) => {
+                // Inner service error - treat as not ready rather than panicking
+                Poll::Pending
+            }
+            Poll::Pending => Poll::Pending,
+        }
     }
 
     fn call(&mut self, request: Request<Body>) -> Self::Future {
@@ -65,18 +77,38 @@ where
             // Convert body to stream to read first chunk
             let mut stream = body.into_data_stream();
 
-            // Buffer to hold first chunk (if any)
-            let mut first_chunk = None;
-            let mut total_read = 0;
+            // Buffer to hold first chunk (if any) - using Bytes to avoid double allocation
+            let mut first_chunk_bytes: Option<Bytes> = None;
+            let mut total_read = 0usize;
 
             // Read the first chunk to check size immediately
             while let Some(result) = stream.next().await {
                 match result {
                     Ok(chunk) => {
                         let chunk_size = chunk.len();
-                        total_read += chunk_size;
 
-                        // Check if first chunk already exceeds limit
+                        // Check individual chunk size before any other processing
+                        if chunk_size > MAX_INDIVIDUAL_CHUNK_SIZE {
+                            return Ok(config.error_format.handle_error(
+                                SizeLimitError::ChunkTooLarge {
+                                    max_chunk_size: MAX_INDIVIDUAL_CHUNK_SIZE,
+                                    actual_chunk_size: chunk_size,
+                                }
+                            ));
+                        }
+
+                        // Use checked_add to prevent integer overflow
+                        total_read = match total_read.checked_add(chunk_size) {
+                            Some(new_total) => new_total,
+                            None => {
+                                // Integer overflow - treat as size limit exceeded
+                                return Ok(config.error_format.handle_error(
+                                    SizeLimitError::SizeOverflow
+                                ));
+                            }
+                        };
+
+                        // Check size BEFORE storing chunk in memory
                         if total_read > max_size {
                             // Size limit exceeded on first chunk!
                             return Ok(config.error_format.handle_error(
@@ -87,7 +119,8 @@ where
                             ));
                         }
 
-                        first_chunk = Some(chunk);
+                        // Now store the chunk (safe since we passed all checks)
+                        first_chunk_bytes = Some(chunk);
                         break; // We only need first chunk for immediate check
                     }
                     Err(e) => {
@@ -101,13 +134,18 @@ where
             }
 
             // Create the checking body for remaining stream
-            let remaining_stream = Body::from_stream(stream.map(|r| r.map_err(|e| axum::Error::new(e))));
+            let remaining_stream = Body::from_stream(SizeLimitedStream::new(
+                stream,
+                max_size,
+                total_read
+            ));
+
             let checking_body = SizeCheckingBody::new(remaining_stream, max_size, total_read);
 
-            // Create final body - either with or without first chunk
-            let final_body = if let Some(chunk) = first_chunk {
-                // We need to create a custom body that starts with first chunk
-                Body::new(ChainedBody::new(chunk, checking_body))
+            // Avoid double buffering by directly passing the chunk
+            let final_body = if let Some(chunk) = first_chunk_bytes {
+                // Create a stream that yields the chunk first, then continues
+                Body::from_stream(ChainedStream::new(chunk, checking_body))
             } else {
                 // No first chunk, just use checking body
                 Body::new(checking_body)
@@ -157,15 +195,15 @@ fn extract_actual_size_from_error(error: &str) -> Option<usize> {
         .and_then(|s| s.parse::<usize>().ok())
 }
 
-/// A body that starts with a first chunk, then continues with another body
+/// A stream that yields a first chunk, then continues with another stream
 #[pin_project]
-struct ChainedBody {
+struct ChainedStream {
     first_chunk: Option<Bytes>,
     #[pin]
     remaining: SizeCheckingBody,
 }
 
-impl ChainedBody {
+impl ChainedStream {
     fn new(first_chunk: Bytes, remaining: SizeCheckingBody) -> Self {
         Self {
             first_chunk: Some(first_chunk),
@@ -174,7 +212,7 @@ impl ChainedBody {
     }
 }
 
-impl Stream for ChainedBody {
+impl Stream for ChainedStream {
     type Item = Result<Bytes, AxumError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -190,7 +228,7 @@ impl Stream for ChainedBody {
     }
 }
 
-impl axum::body::HttpBody for ChainedBody {
+impl axum::body::HttpBody for ChainedStream {
     type Data = Bytes;
     type Error = AxumError;
 
@@ -211,13 +249,100 @@ impl axum::body::HttpBody for ChainedBody {
     }
 }
 
-/// A body that checks size limit for remaining chunks
+/// A stream wrapper that ensures size limits are enforced
 #[pin_project]
+struct SizeLimitedStream<S> {
+    #[pin]
+    inner: S,
+    max_size: usize,
+    bytes_read: usize,
+    has_errored: bool, // Track if we've already returned an error
+}
+
+impl<S> SizeLimitedStream<S> {
+    fn new(inner: S, max_size: usize, initial_bytes: usize) -> Self {
+        Self {
+            inner,
+            max_size,
+            bytes_read: initial_bytes,
+            has_errored: false,
+        }
+    }
+}
+
+impl<S, E> Stream for SizeLimitedStream<S>
+where
+    S: Stream<Item = Result<Bytes, E>>,
+    E: Into<BoxError>,
+{
+    type Item = Result<Bytes, AxumError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+
+        // If we've already errored, don't poll further
+        if *this.has_errored {
+            return Poll::Ready(None);
+        }
+
+        match this.inner.poll_next(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Ready(Some(Ok(chunk))) => {
+                let chunk_size = chunk.len();
+
+                // Check individual chunk size
+                if chunk_size > MAX_INDIVIDUAL_CHUNK_SIZE {
+                    *this.has_errored = true;
+                    return Poll::Ready(Some(Err(AxumError::new(
+                        SizeLimitError::ChunkTooLarge {
+                            max_chunk_size: MAX_INDIVIDUAL_CHUNK_SIZE,
+                            actual_chunk_size: chunk_size,
+                        }
+                    ))));
+                }
+
+                // Check cumulative size with overflow protection
+                match this.bytes_read.checked_add(chunk_size) {
+                    Some(new_total) => {
+                        if new_total > *this.max_size {
+                            *this.has_errored = true;
+                            return Poll::Ready(Some(Err(AxumError::new(
+                                SizeLimitError::BodyTooLarge {
+                                    max_size: *this.max_size,
+                                    actual_size: new_total,
+                                }
+                            ))));
+                        }
+                        *this.bytes_read = new_total;
+                    }
+                    None => {
+                        *this.has_errored = true;
+                        return Poll::Ready(Some(Err(AxumError::new(
+                            SizeLimitError::SizeOverflow
+                        ))));
+                    }
+                }
+
+                Poll::Ready(Some(Ok(chunk)))
+            }
+            Poll::Ready(Some(Err(e))) => {
+                *this.has_errored = true;
+                Poll::Ready(Some(Err(AxumError::new(e))))
+            }
+        }
+    }
+}
+
+/// A body that checks size limit for remaining chunks
+/// Note: We use PinnedDrop because we have a manual Drop implementation
+#[pin_project(PinnedDrop)]
 struct SizeCheckingBody {
     #[pin]
     inner: Body,
     max_size: usize,
     bytes_read: usize, // Bytes already read (including first chunk)
+    has_errored: bool, // Track if we've already returned an error
 }
 
 impl SizeCheckingBody {
@@ -226,6 +351,22 @@ impl SizeCheckingBody {
             inner,
             max_size,
             bytes_read,
+            has_errored: false,
+        }
+    }
+}
+
+#[pinned_drop]
+impl PinnedDrop for SizeCheckingBody {
+    fn drop(self: Pin<&mut Self>) {
+        // This runs when the type is dropped
+        // We can access fields here but they're pinned
+        let this = self.project();
+
+        // Log if body wasn't fully consumed (for debugging)
+        if !*this.has_errored && *this.bytes_read < *this.max_size {
+            // The body wasn't fully consumed - this is normal for early exits
+            // The inner Body will handle its own cleanup
         }
     }
 }
@@ -236,6 +377,11 @@ impl Stream for SizeCheckingBody {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
 
+        // If we've already errored, don't poll further
+        if *this.has_errored {
+            return Poll::Ready(None);
+        }
+
         match this.inner.poll_frame(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(None) => Poll::Ready(None),
@@ -244,23 +390,46 @@ impl Stream for SizeCheckingBody {
                     Ok(chunk) => {
                         let chunk_size = chunk.len();
 
-                        // Check if this chunk would exceed the limit
-                        if *this.bytes_read + chunk_size > *this.max_size {
+                        // Check individual chunk size
+                        if chunk_size > MAX_INDIVIDUAL_CHUNK_SIZE {
+                            *this.has_errored = true;
                             return Poll::Ready(Some(Err(AxumError::new(
-                                SizeLimitError::BodyTooLarge {
-                                    max_size: *this.max_size,
-                                    actual_size: *this.bytes_read + chunk_size,
+                                SizeLimitError::ChunkTooLarge {
+                                    max_chunk_size: MAX_INDIVIDUAL_CHUNK_SIZE,
+                                    actual_chunk_size: chunk_size,
                                 }
                             ))));
                         }
 
-                        *this.bytes_read += chunk_size;
+                        // Check if this chunk would exceed the limit with overflow protection
+                        match this.bytes_read.checked_add(chunk_size) {
+                            Some(new_total) => {
+                                if new_total > *this.max_size {
+                                    *this.has_errored = true;
+                                    return Poll::Ready(Some(Err(AxumError::new(
+                                        SizeLimitError::BodyTooLarge {
+                                            max_size: *this.max_size,
+                                            actual_size: new_total,
+                                        }
+                                    ))));
+                                }
+                                *this.bytes_read = new_total;
+                            }
+                            None => {
+                                *this.has_errored = true;
+                                return Poll::Ready(Some(Err(AxumError::new(
+                                    SizeLimitError::SizeOverflow
+                                ))));
+                            }
+                        }
+
                         Poll::Ready(Some(Ok(chunk)))
                     }
                     Err(_) => Poll::Ready(None),
                 }
             }
             Poll::Ready(Some(Err(e))) => {
+                *this.has_errored = true;
                 Poll::Ready(Some(Err(AxumError::new(e))))
             }
         }
