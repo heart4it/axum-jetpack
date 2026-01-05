@@ -1,4 +1,4 @@
-/// Human-friendly size units
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SizeUnit {
     Bytes,
@@ -14,7 +14,7 @@ pub enum SizeUnit {
 }
 
 impl SizeUnit {
-    /// Parse a size unit from string
+
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "b" | "byte" | "bytes" => Some(SizeUnit::Bytes),
@@ -31,7 +31,7 @@ impl SizeUnit {
         }
     }
 
-    /// Convert to bytes
+
     pub fn to_bytes(&self, value: f64) -> usize {
         match self {
             SizeUnit::Bytes => value as usize,
@@ -48,7 +48,6 @@ impl SizeUnit {
     }
 }
 
-/// Parse human-friendly size string like "1KB", "2.5MB", "1Gbit"
 pub fn parse_human_size(size_str: &str) -> Result<usize, String> {
     let size_str = size_str.trim().to_lowercase();
 
@@ -56,7 +55,6 @@ pub fn parse_human_size(size_str: &str) -> Result<usize, String> {
         return Err("Empty size string".to_string());
     }
 
-    // Find where the number ends
     let mut num_end = 0;
     let chars: Vec<char> = size_str.chars().collect();
 
@@ -72,12 +70,12 @@ pub fn parse_human_size(size_str: &str) -> Result<usize, String> {
         return Err("No number found".to_string());
     }
 
-    // Parse the number
+
     let num_part = &size_str[..num_end];
     let num = num_part.replace(',', ".").parse::<f64>()
         .map_err(|e| format!("Invalid number '{}': {}", num_part, e))?;
 
-    // Parse the unit (if any)
+
     let unit_part = size_str[num_end..].trim();
     let unit = if unit_part.is_empty() {
         SizeUnit::Bytes
@@ -89,7 +87,6 @@ pub fn parse_human_size(size_str: &str) -> Result<usize, String> {
     Ok(unit.to_bytes(num))
 }
 
-/// Human-friendly size wrapper
 #[derive(Debug, Clone, Copy)]
 pub struct SizeLimit(pub usize);
 
@@ -113,7 +110,6 @@ impl From<String> for SizeLimit {
     }
 }
 
-// Common size constants
 impl SizeLimit {
     pub const KB: SizeLimit = SizeLimit(1024);
     pub const MB: SizeLimit = SizeLimit(1024 * 1024);
@@ -181,10 +177,8 @@ mod tests {
         assert_eq!(parse_human_size("10Mbit").unwrap(), 1_250_000);
         assert_eq!(parse_human_size("1Gbit").unwrap(), 125_000_000);
 
-        // Test with commas
         assert_eq!(parse_human_size("1,5MB").unwrap(), 1_500_000);
 
-        // Test invalid inputs
         assert!(parse_human_size("").is_err());
         assert!(parse_human_size("abc").is_err());
         assert!(parse_human_size("1XB").is_err()); // Unknown unit
