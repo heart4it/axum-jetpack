@@ -89,7 +89,7 @@ async fn handle_upload_body(body: Body) -> impl IntoResponse {
     format!("Uploaded: {} bytes", total).into_response()
 }
 
-async fn handle_data(mut req: Request<Body>) -> impl IntoResponse {
+async fn handle_data(req: Request<Body>) -> impl IntoResponse {
     let content_type = req.headers()
         .get(axum::http::header::CONTENT_TYPE)
         .and_then(|h| h.to_str().ok())
