@@ -6,16 +6,16 @@ It contains a collection of tools to improve the axum framework and security asp
 Currently it contains the following features:
 * Size limit middleware: A configurable middleware for Axum framework that enforces request size limits with intelligent buffering and streaming strategies.
   ## Features 
-  1. **Content-Type Based Limits** - Set different limits for different content types
-  2. **Wildcard Support** - Use patterns like `image/*` or `video/*`
-  3. **Buffering Strategy** - Intelligent decision to buffer or stream
-  4. **Human-Readable Sizes** - Use strings like "10MB" or "100KB"
-  5. **Early soft rejection** - First weak rejection based on Content-Length header
-  6  **Early hard rejection** - Counts bytes and disallows request if limit is exceeded.
-  7. **Streaming Support** - Handle large files without buffering
-  8. **Customizable Defaults** - Configure default behavior
-  9. **Multipart Support** - Handle file upload limits
-  10. **Production Ready** - Proper error handling and responses
+  * **Content-Type Based Limits** - Set different limits for different content types
+  * **Wildcard Support** - Use patterns like `image/*` or `video/*`
+  * **Buffering Strategy** - Intelligent decision to buffer or stream
+  * **Human-Readable Sizes** - Use strings like "10MB" or "100KB"
+  * **Early soft rejection** - First weak rejection based on Content-Length header
+  * **Early hard rejection** - Counts bytes and disallows request if limit is exceeded.
+  * **Streaming Support** - Handle large files without buffering
+  * **Customizable Defaults** - Configure default behavior
+  * **Multipart Support** - Handle file upload limits
+  * **Production Ready** - Proper error handling and responses
 
   ## Important notes:
   * This middleware is only effective when also other axum limits set correctly.
