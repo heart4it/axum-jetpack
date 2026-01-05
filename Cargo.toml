@@ -2,6 +2,11 @@
 name = "axum-jetpack"
 version = "0.8.0"
 edition = "2024"
+license = "MIT"
+keywords = ["axum", "jetpack", "extra", "body", "limit"]
+description = "Contains a collection of tools to improve the axum framework and security aspects"
+readme = "README.md"
+repository = "https://github.com/heart4it/axum-jetpack"
 
 [[bin]]
 name = "example"
