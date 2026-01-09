@@ -27,7 +27,7 @@ Currently it contains the following features:
 
 ```toml
 [dependencies]
-axum-jetpack = "0.8.0" # currently suppoerted axum version
+axum-jetpack = "0.8.1" # currently supported axum version
 ```
 
 ## Usage example

@@ -485,16 +485,13 @@ pub fn with_size_limit(router: Router, config: SizeLimitMiddlewareConfig) -> Rou
             let limit = config.size_limits.get_limit_for_content_type(content_type);
 
             // Early rejection based on Content-Length header (if present)
-            if let Some(content_length) = req.headers().get(axum::http::header::CONTENT_LENGTH) {
-                if let Ok(length_str) = content_length.to_str() {
-                    if let Ok(content_length_value) = length_str.parse::<usize>() {
-                        if content_length_value > limit {
+            if let Some(content_length) = req.headers().get(axum::http::header::CONTENT_LENGTH)
+                && let Ok(length_str) = content_length.to_str()
+                    && let Ok(content_length_value) = length_str.parse::<usize>()
+                        && content_length_value > limit {
                             // Request is already too large based on Content-Length header
                             return Ok((StatusCode::PAYLOAD_TOO_LARGE, "Payload too large").into_response());
                         }
-                    }
-                }
-            }
 
             // Choose processing strategy based on content type
             if config.buffer_strategy.should_buffer(content_type) {

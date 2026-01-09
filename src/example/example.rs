@@ -10,8 +10,9 @@ use axum_jetpack::size_limit::{with_size_limit, BufferStrategy, SizeLimitConfig,
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
+#[allow(clippy::expect_used)]
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a CLEAN size limit configuration (no pre-configured JSON limit)
     let size_limits = SizeLimitConfig::default()
         .with_default_limit("1b")
@@ -60,9 +61,11 @@ async fn main() {
 
     let app = with_size_limit(app, middleware_config);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
     println!("Listening on http://127.0.0.1:3000");
-    axum::serve(listener, app.into_make_service()).await.unwrap();
+    axum::serve(listener, app.into_make_service()).await?;
+
+    Ok(())
 }
 
 #[derive(Deserialize, Serialize)]

@@ -26,16 +26,16 @@
 /// use axum_jetpack::size_limit::SizeUnit;
 ///
 /// // Decimal units
-/// assert_eq!(SizeUnit::from_str("MB"), Some(SizeUnit::Megabytes));
-/// assert_eq!(SizeUnit::from_str("gigabyte"), Some(SizeUnit::Gigabytes));
+/// assert_eq!(SizeUnit::parse("MB"), Some(SizeUnit::Megabytes));
+/// assert_eq!(SizeUnit::parse("gigabyte"), Some(SizeUnit::Gigabytes));
 ///
 /// // Binary units
-/// assert_eq!(SizeUnit::from_str("MiB"), Some(SizeUnit::Mebibytes));
-/// assert_eq!(SizeUnit::from_str("gibibytes"), Some(SizeUnit::Gibibytes));
+/// assert_eq!(SizeUnit::parse("MiB"), Some(SizeUnit::Mebibytes));
+/// assert_eq!(SizeUnit::parse("gibibytes"), Some(SizeUnit::Gibibytes));
 ///
 /// // Bit units
-/// assert_eq!(SizeUnit::from_str("Mbit"), Some(SizeUnit::Megabits));
-/// assert_eq!(SizeUnit::from_str("gigabits"), Some(SizeUnit::Gigabits));
+/// assert_eq!(SizeUnit::parse("Mbit"), Some(SizeUnit::Megabits));
+/// assert_eq!(SizeUnit::parse("gigabits"), Some(SizeUnit::Gigabits));
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SizeUnit {
@@ -123,27 +123,27 @@ impl SizeUnit {
     /// use axum_jetpack::size_limit::SizeUnit;
     ///
     /// // Case-insensitive parsing
-    /// assert_eq!(SizeUnit::from_str("MB"), Some(SizeUnit::Megabytes));
-    /// assert_eq!(SizeUnit::from_str("mb"), Some(SizeUnit::Megabytes));
-    /// assert_eq!(SizeUnit::from_str("Mb"), Some(SizeUnit::Megabytes));
+    /// assert_eq!(SizeUnit::parse("MB"), Some(SizeUnit::Megabytes));
+    /// assert_eq!(SizeUnit::parse("mb"), Some(SizeUnit::Megabytes));
+    /// assert_eq!(SizeUnit::parse("Mb"), Some(SizeUnit::Megabytes));
     ///
     /// // Full names work too
-    /// assert_eq!(SizeUnit::from_str("megabyte"), Some(SizeUnit::Megabytes));
-    /// assert_eq!(SizeUnit::from_str("megabytes"), Some(SizeUnit::Megabytes));
+    /// assert_eq!(SizeUnit::parse("megabyte"), Some(SizeUnit::Megabytes));
+    /// assert_eq!(SizeUnit::parse("megabytes"), Some(SizeUnit::Megabytes));
     ///
     /// // Binary units
-    /// assert_eq!(SizeUnit::from_str("MiB"), Some(SizeUnit::Mebibytes));
-    /// assert_eq!(SizeUnit::from_str("mebibyte"), Some(SizeUnit::Mebibytes));
+    /// assert_eq!(SizeUnit::parse("MiB"), Some(SizeUnit::Mebibytes));
+    /// assert_eq!(SizeUnit::parse("mebibyte"), Some(SizeUnit::Mebibytes));
     ///
     /// // Bit units
-    /// assert_eq!(SizeUnit::from_str("Mbit"), Some(SizeUnit::Megabits));
-    /// assert_eq!(SizeUnit::from_str("megabit"), Some(SizeUnit::Megabits));
+    /// assert_eq!(SizeUnit::parse("Mbit"), Some(SizeUnit::Megabits));
+    /// assert_eq!(SizeUnit::parse("megabit"), Some(SizeUnit::Megabits));
     ///
     /// // Unknown units return None
-    /// assert_eq!(SizeUnit::from_str("TB"), None); // Terabytes not supported
-    /// assert_eq!(SizeUnit::from_str("foo"), None);
+    /// assert_eq!(SizeUnit::parse("TB"), None); // Terabytes not supported
+    /// assert_eq!(SizeUnit::parse("foo"), None);
     /// ```
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             // Byte units
             "b" | "byte" | "bytes" => Some(SizeUnit::Bytes),
@@ -288,7 +288,7 @@ pub fn parse_human_size(size_str: &str) -> Result<usize, String> {
 
     for (i, c) in chars.iter().enumerate() {
         // Accept digits, period, or comma as part of the number
-        if c.is_digit(10) || *c == '.' || *c == ',' {
+        if c.is_ascii_digit() || *c == '.' || *c == ',' {
             num_end = i + 1;
         } else {
             // Stop at first non-numeric character (start of unit)
@@ -313,7 +313,7 @@ pub fn parse_human_size(size_str: &str) -> Result<usize, String> {
         // Default to bytes if no unit specified
         SizeUnit::Bytes
     } else {
-        SizeUnit::from_str(unit_part)
+        SizeUnit::parse(unit_part)
             .ok_or_else(|| format!("Unknown unit '{}'", unit_part))?
     };
 
